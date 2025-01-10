@@ -1,9 +1,9 @@
 # MLops-image-classification
 
-## Project Title:
+## Project Title
 Real-Time Species Detection and Classification System
 
-## Goal:
+## Goal
 The primary objective of this project is to develop a Real-Time Species Detection and Classification System for use in Scientific Research, with a focus on:
 * Automating the classification of thousands of animal and plant images to aid ecological studies.
 * Enabling real-time detection and monitoring of species distribution and migration patterns, facilitating data-driven insights into wildlife behavior and conservation efforts.

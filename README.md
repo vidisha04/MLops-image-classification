@@ -37,6 +37,8 @@ Labels: Mapped as follows:
 
 The dataset format includes a train folder for supervised learning and a test folder for evaluation and predictions.
 
+*Source of the data: "[Kaggle, Deep Learning Practice - Image Classification](https://www.kaggle.com/competitions/deep-learning-practice-image-classification/data?select=train)"*
+
 ## Models
 The project anticipates employing the following models:
 1. Baseline Model: A simple CNN architecture to establish a baseline for classification accuracy.

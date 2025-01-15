@@ -1,6 +1,10 @@
 # Data
 /data/
 
+# Google Drive credentials
+real_time_species_detection_and_classification_system/credentials.json
+
+
 # Mac OS-specific storage files
 .DS_Store
 

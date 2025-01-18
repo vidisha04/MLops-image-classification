@@ -78,13 +78,15 @@ def process_and_upload(blob_name, pipeline, output_prefix, labels=None, is_test=
 
         # Add label if applicable
         if labels is not None:
-            class_name = Path(blob_name).parent.name
+            class_name = Path(blob_name).stem.split('_')[0]
             label = LABEL_MAPPING.get(class_name, None)
             if label is not None:
                 labels.append({
                     "filename": output_blob_name,
                     "label": label
                 })
+            else:
+                logger.warning(f"Label not found for {blob_name}, skipping.")
 
     except Exception as e:
         logger.error(f"Failed to process {blob_name}: {e}")
@@ -121,7 +123,7 @@ def main():
             f"train/{RAW_FOLDER}",
             f"train/{PROCESSED_FOLDER}",
             pipeline,
-            labels_csv=f"train/train_labels.csv",
+            labels_csv="train/train_labels.csv",
             is_test=False
         )
 

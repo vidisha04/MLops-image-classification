@@ -9,6 +9,8 @@ from loguru import logger
 from tqdm import tqdm
 import pandas as pd
 import typer
+from google.cloud import storage
+import io
 
 # Adjust sys.path to include the project root
 import sys
@@ -20,17 +22,25 @@ from real_time_species_detection_and_classification_system.config import MODELS_
 app = typer.Typer()
 
 # Dataset Class
-class PreprocessedDataset(Dataset):
-    def __init__(self, data_dir: Path, labels_csv: Path):
+class GCSPreprocessedDataset(Dataset):
+    def __init__(self, bucket_name: str, data_dir: str, labels_csv_blob: str):
         """
-        Custom Dataset to load preprocessed tensors and labels.
+        Custom Dataset to load preprocessed tensors and labels from GCS.
 
         Args:
-            data_dir (Path): Path to the directory containing preprocessed .pt files.
-            labels_csv (Path): Path to the CSV file containing filenames and labels.
+            bucket_name (str): Name of the GCS bucket.
+            data_dir (str): Path in the bucket containing preprocessed .pt files.
+            labels_csv_blob (str): Path in the bucket to the CSV file containing filenames and labels.
         """
+        self.bucket_name = bucket_name
         self.data_dir = data_dir
-        self.labels_df = pd.read_csv(labels_csv)
+        self.storage_client = storage.Client()
+
+        # Download labels CSV
+        bucket = self.storage_client.bucket(bucket_name)
+        blob = bucket.blob(labels_csv_blob)
+        labels_data = blob.download_as_bytes()
+        self.labels_df = pd.read_csv(io.BytesIO(labels_data))
         self.file_names = self.labels_df["filename"].values
         self.labels = self.labels_df["label"].values
 
@@ -40,31 +50,32 @@ class PreprocessedDataset(Dataset):
     def __getitem__(self, idx):
         file_name = self.file_names[idx]
         label = self.labels[idx]
-        tensor_path = self.data_dir / file_name
-        tensor = torch.load(tensor_path)
+
+        # Load tensor from GCS
+        bucket = self.storage_client.bucket(self.bucket_name)
+        blob = bucket.blob(f"{self.data_dir}/{file_name}")
+        tensor_data = blob.download_as_bytes()
+        tensor = torch.load(io.BytesIO(tensor_data))
         return tensor, label
+
 
 @app.command()
 def main(
-    train_data_dir: Path = PROCESSED_DATA_DIR / "train",
-    train_labels_csv: Path = PROCESSED_DATA_DIR / "train_labels.csv",
-    model_output_path: Path = MODELS_DIR / "resnet18_model.pth",
-    metrics_output_path: Path = INTERIM_DATA_DIR / "training_metrics.csv",
+    gcs_bucket_name: str,
+    train_data_dir: str = "mlops_species_detection_data/train/processed",
+    train_labels_csv: str = "mlops_species_detection_data/train/processed/train_labels.csv",
+    model_output_path: str = "mlops_species_detection_data/train/resnet18_model.pth",
     batch_size: int = 32,
     epochs: int = 10,
     learning_rate: float = 0.001,
 ):
     """
-    Train a ResNet-18 model using preprocessed tensors and save the trained model and training metrics.
+    Train a ResNet-18 model using preprocessed tensors stored in GCS and save the trained model back to GCS.
     """
     logger.info("Starting model training...")
 
-    # Ensure output directories exist
-    os.makedirs(MODELS_DIR, exist_ok=True)
-    os.makedirs(INTERIM_DATA_DIR, exist_ok=True)
-
     # Load dataset and create DataLoader
-    train_dataset = PreprocessedDataset(train_data_dir, train_labels_csv)
+    train_dataset = GCSPreprocessedDataset(gcs_bucket_name, train_data_dir, train_labels_csv)
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 
     # Load ResNet-18 model
@@ -78,9 +89,6 @@ def main(
     # Move model to GPU if available
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = model.to(device)
-
-    # Prepare to log metrics
-    metrics = {"epoch": [], "train_loss": [], "train_accuracy": []}
 
     # Training loop
     for epoch in range(epochs):
@@ -110,22 +118,16 @@ def main(
 
         epoch_loss = running_loss / len(train_dataset)
         epoch_acc = 100 * correct / total
-
         logger.info(f"Epoch {epoch + 1} - Loss: {epoch_loss:.4f}, Accuracy: {epoch_acc:.2f}%")
 
-        # Save metrics
-        metrics["epoch"].append(epoch + 1)
-        metrics["train_loss"].append(epoch_loss)
-        metrics["train_accuracy"].append(epoch_acc)
-
-    # Save metrics to interim directory
-    metrics_df = pd.DataFrame(metrics)
-    metrics_df.to_csv(metrics_output_path, index=False)
-    logger.info(f"Training metrics saved to {metrics_output_path}")
-
-    # Save the trained model
-    torch.save(model.state_dict(), model_output_path)
-    logger.success(f"Training complete. Model saved to {model_output_path}")
+    # Save the trained model to GCS
+    bucket = storage.Client().bucket(gcs_bucket_name)
+    blob = bucket.blob(model_output_path)
+    model_data = io.BytesIO()
+    torch.save(model.state_dict(), model_data)
+    model_data.seek(0)
+    blob.upload_from_file(model_data, content_type="application/octet-stream")
+    logger.success(f"Training complete. Model saved to {model_output_path} in GCS.")
 
 
 if __name__ == "__main__":

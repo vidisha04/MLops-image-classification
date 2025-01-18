@@ -7,19 +7,14 @@ from tqdm import tqdm
 from torchvision import transforms
 import torch
 import pandas as pd
-import sys
-
-# Add the project root directory to sys.path
-project_root = Path(__file__).resolve().parents[1]
-sys.path.append(str(project_root))
-
-from real_time_species_detection_and_classification_system.config import PROCESSED_DATA_DIR, RAW_DATA_DIR
+from google.cloud import storage
+import tempfile
 
 # Initialize Typer app
 app = typer.Typer()
 
 # Configure the logger
-LOG_FILE = project_root / "logs" / "preprocessing.log"
+LOG_FILE = Path("logs/preprocessing.log")
 os.makedirs(LOG_FILE.parent, exist_ok=True)
 logger.add(LOG_FILE, rotation="500 MB", level="INFO", backtrace=True, diagnose=True)
 
@@ -37,6 +32,13 @@ LABEL_MAPPING = {
     "Reptilia": 9,
 }
 
+# Google Cloud Storage settings
+GCS_BUCKET_NAME = "mlops_species_detection_data"
+RAW_FOLDER = "raw"
+PROCESSED_FOLDER = "processed"
+storage_client = storage.Client()
+bucket = storage_client.bucket(GCS_BUCKET_NAME)
+
 # Preprocessing pipeline for ResNet-18
 def get_resnet_preprocessing_pipeline():
     return transforms.Compose([
@@ -48,124 +50,90 @@ def get_resnet_preprocessing_pipeline():
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
 
-def preprocess_images(input_dir: Path, output_dir: Path, pipeline, labels_csv=None, is_test=False):
-    """
-    Preprocess images from the input directory and save them to the output directory.
+def list_gcs_files(bucket, prefix):
+    blobs = bucket.list_blobs(prefix=prefix)
+    return [blob.name for blob in blobs if not blob.name.endswith("/")]
 
-    Args:
-        input_dir (Path): Path to the raw data directory (e.g., raw/train or raw/test).
-        output_dir (Path): Path to the processed data directory (e.g., processed/train or processed/test).
-        pipeline: Preprocessing pipeline to apply to each image.
-        labels_csv: Path to save labels for the training dataset (only for train folder).
-        is_test: Flag indicating whether the input directory is for test data.
-    """
-    os.makedirs(output_dir, exist_ok=True)
-    logger.info(f"Starting preprocessing for directory: {input_dir}")
+def process_and_upload(blob_name, pipeline, output_prefix, labels=None, is_test=False):
+    try:
+        # Download file to a temporary location
+        blob = bucket.blob(blob_name)
+        with tempfile.NamedTemporaryFile(delete=False) as temp_file:
+            blob.download_to_filename(temp_file.name)
+            temp_file_path = temp_file.name
 
+        # Process the image
+        with Image.open(temp_file_path).convert("RGB") as image:
+            processed_image = pipeline(image)
+
+        # Prepare the output blob name
+        output_blob_name = blob_name.replace(RAW_FOLDER, PROCESSED_FOLDER).replace(".jpg", ".pt").replace(".jpeg", ".pt").replace(".png", ".pt")
+
+        # Save processed image to a temporary file and upload to GCS
+        with tempfile.NamedTemporaryFile(delete=False) as temp_file:
+            torch.save(processed_image, temp_file.name)
+            bucket.blob(output_blob_name).upload_from_filename(temp_file.name)
+
+        logger.info(f"Processed and uploaded: {output_blob_name}")
+
+        # Add label if applicable
+        if labels is not None:
+            class_name = Path(blob_name).parent.name
+            label = LABEL_MAPPING.get(class_name, None)
+            if label is not None:
+                labels.append({
+                    "filename": output_blob_name,
+                    "label": label
+                })
+
+    except Exception as e:
+        logger.error(f"Failed to process {blob_name}: {e}")
+
+def preprocess_gcs_folder(input_prefix, output_prefix, pipeline, labels_csv=None, is_test=False):
     labels = []
 
-    if is_test:
-        # Test folder: Process files directly (no subdirectories)
-        for file_name in tqdm(os.listdir(input_dir), desc="Processing test images", unit="file"):
-            input_path = input_dir / file_name
-            output_path = output_dir / file_name
+    files = list_gcs_files(bucket, input_prefix)
+    if not files:
+        logger.warning(f"No files found in GCS path: {input_prefix}")
+        return
 
-            if input_path.suffix.lower() in [".jpg", ".jpeg", ".png"]:
-                try:
-                    # Load and preprocess the image
-                    image = Image.open(input_path).convert("RGB")
-                    processed_image = pipeline(image)
+    for blob_name in tqdm(files, desc="Processing images", unit="file"):
+        process_and_upload(blob_name, pipeline, output_prefix, labels, is_test)
 
-                    # Save the preprocessed tensor
-                    torch.save(processed_image, output_path.with_suffix(".pt"))
-                    logger.info(f"Saved processed test file: {output_path.with_suffix('.pt')}")
-                except Exception as e:
-                    logger.error(f"Failed to process {input_path}: {e}")
-            else:
-                logger.warning(f"Skipped non-image file: {input_path}")
-    else:
-        # Train folder: Process subdirectories (classes)
-        for class_name in sorted(os.listdir(input_dir)):
-            class_dir = input_dir / class_name
-            if not class_dir.is_dir():
-                logger.warning(f"Skipping non-directory item: {class_dir}")
-                continue
+    # Save labels CSV to GCS
+    if labels_csv and labels:
+        labels_df = pd.DataFrame(labels)
+        with tempfile.NamedTemporaryFile(delete=False) as temp_file:
+            labels_df.to_csv(temp_file.name, index=False)
+            bucket.blob(labels_csv).upload_from_filename(temp_file.name)
 
-            logger.info(f"Processing class: {class_name}, Path: {class_dir}")
-            label = LABEL_MAPPING.get(class_name, None)
-            if label is None:
-                logger.warning(f"Unknown class: {class_name}, skipping.")
-                continue
-
-            output_class_dir = output_dir / class_name
-            os.makedirs(output_class_dir, exist_ok=True)
-            logger.info(f"Output directory for class: {output_class_dir}")
-
-            for file_name in tqdm(os.listdir(class_dir), desc=f"Processing {class_name}", unit="file"):
-                input_path = class_dir / file_name
-                output_path = output_class_dir / file_name
-
-                if input_path.suffix.lower() in [".jpg", ".jpeg", ".png"]:
-                    try:
-                        # Load and preprocess the image
-                        image = Image.open(input_path).convert("RGB")
-                        processed_image = pipeline(image)
-
-                        # Save the preprocessed tensor
-                        torch.save(processed_image, output_path.with_suffix(".pt"))
-                        logger.info(f"Saved processed file: {output_path.with_suffix('.pt')}")
-
-                        # Add folder name as prefix to filename
-                        labels.append({
-                            "filename": f"{class_name}/{file_name}".replace(Path(file_name).suffix, ".pt"),
-                            "label": label
-                        })
-
-                    except Exception as e:
-                        logger.error(f"Failed to process {input_path}: {e}")
-                else:
-                    logger.warning(f"Skipped non-image file: {input_path}")
-
-    if labels_csv and not is_test:
-        pd.DataFrame(labels).to_csv(labels_csv, index=False)
-        logger.info(f"Labels saved to {labels_csv}")
-
-    logger.info(f"Completed preprocessing for directory: {input_dir}")
-
+        logger.info(f"Labels saved to: {labels_csv}")
 
 @app.command()
-def main(
-    raw_train_path: Path = RAW_DATA_DIR / "train",
-    raw_test_path: Path = RAW_DATA_DIR / "test",
-    processed_train_path: Path = PROCESSED_DATA_DIR / "train",
-    processed_test_path: Path = PROCESSED_DATA_DIR / "test",
-    train_labels_csv: Path = PROCESSED_DATA_DIR / "train_labels.csv",
-):
-    logger.info("Starting the preprocessing pipeline.")
-
+def main():
     pipeline = get_resnet_preprocessing_pipeline()
 
+    logger.info("Starting preprocessing pipeline...")
+
     try:
-        # Process train dataset
-        logger.info("Processing train dataset...")
-        preprocess_images(
-            raw_train_path,
-            processed_train_path,
+        # Process training data
+        preprocess_gcs_folder(
+            f"train/{RAW_FOLDER}",
+            f"train/{PROCESSED_FOLDER}",
             pipeline,
-            labels_csv=train_labels_csv,
+            labels_csv=f"train/train_labels.csv",
             is_test=False
         )
 
-        # Process test dataset
-        logger.info("Processing test dataset...")
-        preprocess_images(
-            raw_test_path,
-            processed_test_path,
+        # Process testing data
+        preprocess_gcs_folder(
+            f"test/{RAW_FOLDER}",
+            f"test/{PROCESSED_FOLDER}",
             pipeline,
             is_test=True
         )
 
-        logger.success("Preprocessing complete. Processed data saved in the processed directory.")
+        logger.success("Preprocessing complete. Processed data uploaded to GCS.")
     except Exception as e:
         logger.critical(f"An unexpected error occurred: {e}")
 

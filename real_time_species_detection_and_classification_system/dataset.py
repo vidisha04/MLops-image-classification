@@ -101,7 +101,7 @@ if __name__ == "__main__":
     drive_service = build("drive", "v3", credentials=creds)
 
     # Process each folder
-    raw_dir = "raw"
+    raw_dir = "train/raw"
     for folder_name, folder_id in folder_ids.items():
         print(f"Processing folder: {folder_name}")
         process_folder(drive_service, folder_id, BUCKET_NAME, destination_prefix=raw_dir)

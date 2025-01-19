@@ -93,7 +93,7 @@ def process_and_upload(blob_name, pipeline, output_prefix, labels=None, is_test=
         logger.error(f"Failed to process {blob_name}: {e}")
 
 def preprocess_gcs_folder(input_prefix, output_prefix, pipeline, labels_csv=None, is_test=False):
-    labels = []
+    labels = [] if not is_test else None
 
     files = list_gcs_files(bucket, input_prefix)
     if not files:
@@ -113,30 +113,45 @@ def preprocess_gcs_folder(input_prefix, output_prefix, pipeline, labels_csv=None
         logger.info(f"Labels saved to: {labels_csv}")
 
 @app.command()
-def main():
+def main(is_test:bool = False):
+    """
+    Preprocess images and upload them to GCS.
+    
+    Args:
+        is_test (bool): If True, preprocess only test data. Default is False. (--is-test)
+    """
     pipeline = get_resnet_preprocessing_pipeline()
 
     logger.info("Starting preprocessing pipeline...")
 
     try:
-        # Process training data
-        preprocess_gcs_folder(
-            f"train/{RAW_FOLDER}",
-            f"train/{PROCESSED_FOLDER}",
-            pipeline,
-            labels_csv="train/train_labels.csv",
-            is_test=False
-        )
-
-        # Process testing data
-        preprocess_gcs_folder(
+        if is_test:
+            # Process testing data only
+            preprocess_gcs_folder(
             f"test/{RAW_FOLDER}",
             f"test/{PROCESSED_FOLDER}",
             pipeline,
             is_test=True
-        )
-
-        logger.success("Preprocessing complete. Processed data uploaded to GCS.")
+            )
+            logger.success("Test preprocessing complete. Processed data uploaded to GCS.")
+        else: 
+            # Process training data
+            preprocess_gcs_folder(
+                f"train/{RAW_FOLDER}",
+                f"train/{PROCESSED_FOLDER}",
+                pipeline,
+                labels_csv="train/train_labels.csv",
+                is_test=False
+            )
+            # Process testing data (to run the script in full mode)
+            preprocess_gcs_folder(
+                f"test/{RAW_FOLDER}",
+                f"test/{PROCESSED_FOLDER}",
+                pipeline,
+                is_test=True
+            )
+            logger.success("Preprocessing complete. Processed data uploaded to GCS.")
+    
     except Exception as e:
         logger.critical(f"An unexpected error occurred: {e}")
 

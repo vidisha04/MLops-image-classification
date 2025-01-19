@@ -1,5 +1,5 @@
-import io
 import os
+import argparse
 from pathlib import Path
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
@@ -16,20 +16,6 @@ SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
 
 # Google Cloud Storage bucket name
 BUCKET_NAME = "mlops_species_detection_data"
-
-# Google Drive folder IDs
-folder_ids = {
-    'Amphibia': '1MpR8ZoI3QLnWbqisKovFbW_McE_o1--2',
-    'Animalia': '1W59fH3UJbWLv3ANQmAf-Zch5sxSj6pTw',
-    'Arachnida': '1OFrhaKiTjZ4MTMoTRW14VkmDYEVbEpAm',
-    'Aves': '15el3Jpm_YncRul2Y1VLuMI6NQ9umME3B',
-    'Fungi': '1JlVyX0d7VGuN4SRfOKda8OJg87m4I_iz',
-    'Insecta': '1TCg21HAn88XqDZo7pFpyQ52phtYSvFa-',
-    'Mammalia': '1DyEjx9cIOyeFVmn3of-KYWJRZWwYj04F',
-    'Mollusca': '1cXIXC6GgwTJEnPWP1OZQXVJBWoWUp6un',
-    'Plantae': '1XF5PtEEB7_m1ttxq_hk-9VwkEXl6oXpo',
-    'Reptilia': '1FygC0DGD0caRCJOVhZPj_CvJvXLOCeWr'
-}
 
 
 def list_files_in_folder(service, folder_id):
@@ -99,9 +85,32 @@ if __name__ == "__main__":
     # Authenticate using the service account
     creds = Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=SCOPES)
     drive_service = build("drive", "v3", credentials=creds)
+    
+    # Set up argument parser
+    parser = argparse.ArgumentParser(description="Process train or test datasets.")
+    parser.add_argument("--is_test", action="store_true", help="Use test images folder if set.")
+    args = parser.parse_args()
 
     # Process each folder
-    raw_dir = "train/raw"
+    if args.is_test:
+        raw_dir = "test/raw"
+        folder_ids = {"Test Images": "11pXCDdKrI9_mM5KKRhfhBeGhuHsa83F4"}
+
+    else: # is_train = True
+        raw_dir = "train/raw"
+        folder_ids = {
+            'Amphibia': '1MpR8ZoI3QLnWbqisKovFbW_McE_o1--2',
+            'Animalia': '1W59fH3UJbWLv3ANQmAf-Zch5sxSj6pTw',
+            'Arachnida': '1OFrhaKiTjZ4MTMoTRW14VkmDYEVbEpAm',
+            'Aves': '15el3Jpm_YncRul2Y1VLuMI6NQ9umME3B',
+            'Fungi': '1JlVyX0d7VGuN4SRfOKda8OJg87m4I_iz',
+            'Insecta': '1TCg21HAn88XqDZo7pFpyQ52phtYSvFa-',
+            'Mammalia': '1DyEjx9cIOyeFVmn3of-KYWJRZWwYj04F',
+            'Mollusca': '1cXIXC6GgwTJEnPWP1OZQXVJBWoWUp6un',
+            'Plantae': '1XF5PtEEB7_m1ttxq_hk-9VwkEXl6oXpo',
+            'Reptilia': '1FygC0DGD0caRCJOVhZPj_CvJvXLOCeWr'
+        }
+
     for folder_name, folder_id in folder_ids.items():
         print(f"Processing folder: {folder_name}")
         process_folder(drive_service, folder_id, BUCKET_NAME, destination_prefix=raw_dir)

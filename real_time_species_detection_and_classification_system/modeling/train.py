@@ -17,7 +17,7 @@ import sys
 project_root = Path(__file__).resolve().parents[2]  # Adjusting for 'modeling' subfolder
 sys.path.append(str(project_root))
 
-from real_time_species_detection_and_classification_system.config import MODELS_DIR, PROCESSED_DATA_DIR, INTERIM_DATA_DIR
+#from real_time_species_detection_and_classification_system.config import MODELS_DIR, PROCESSED_DATA_DIR, INTERIM_DATA_DIR
 
 app = typer.Typer()
 
@@ -33,7 +33,7 @@ class GCSPreprocessedDataset(Dataset):
             labels_csv_blob (str): Path in the bucket to the CSV file containing filenames and labels.
         """
         self.bucket_name = bucket_name
-        self.data_dir = data_dir
+        self.data_dir = data_dir.rstrip("/")
         self.storage_client = storage.Client()
 
         # Download labels CSV
@@ -61,10 +61,10 @@ class GCSPreprocessedDataset(Dataset):
 
 @app.command()
 def main(
-    gcs_bucket_name: str,
-    train_data_dir: str = "mlops_species_detection_data/train/processed",
-    train_labels_csv: str = "mlops_species_detection_data/train/processed/train_labels.csv",
-    model_output_path: str = "mlops_species_detection_data/train/resnet18_model.pth",
+    gcs_bucket_name: str = "mlops_species_detection_data",
+    train_data_dir: str = "train/processed",
+    train_labels_csv: str = "train/train_labels.csv",
+    model_output_path: str = "train/resnet18_model.pth",
     batch_size: int = 32,
     epochs: int = 10,
     learning_rate: float = 0.001,

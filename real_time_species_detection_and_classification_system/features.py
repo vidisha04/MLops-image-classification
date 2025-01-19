@@ -68,6 +68,7 @@ def process_and_upload(blob_name, pipeline, output_prefix, labels=None, is_test=
 
         # Prepare the output blob name
         output_blob_name = blob_name.replace(RAW_FOLDER, PROCESSED_FOLDER).replace(".jpg", ".pt").replace(".jpeg", ".pt").replace(".png", ".pt")
+        output_name = os.path.basename(output_blob_name)
 
         # Save processed image to a temporary file and upload to GCS
         with tempfile.NamedTemporaryFile(delete=False) as temp_file:
@@ -82,7 +83,7 @@ def process_and_upload(blob_name, pipeline, output_prefix, labels=None, is_test=
             label = LABEL_MAPPING.get(class_name, None)
             if label is not None:
                 labels.append({
-                    "filename": output_blob_name,
+                    "filename": output_name,
                     "label": label
                 })
             else:

@@ -1,0 +1,10 @@
+gcs:
+  bucket_name: mlops_species_detection_data
+  train_data_dir: train/processed
+  train_labels_csv: train/train_labels.csv
+  model_output_path: train/resnet18_model.pth
+training:
+  batch_size: 32
+  epochs: 10
+  learning_rate: 0.001
+  metrics_output_path: data/interim/training_metrics.csv
